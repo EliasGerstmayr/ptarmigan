@@ -22,6 +22,33 @@ To build with a combination of these features, run:
 cargo build --release --features with-mpi,hdf5-output [-j NUM_THREADS]
 ```
 
+## macOS with Homebrew
+
+For the current development setup (Homebrew rustup, versioned MPI-enabled HDF5
+1.14.4, Open MPI and libaec), use the installed formula paths:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+export HDF5_DIR="$(brew --prefix hdf5-mpi@1.14.4)"
+```
+
+`HDF5_DIR` selects the library for HDF5-enabled builds. It is not needed for the
+focused storage-only tests, which use no HDF5 feature:
+
+```bash
+cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
+```
+
+For the existing MPI/HDF5 feature combination:
+
+```bash
+cargo build --locked --release -p ptarmigan --features with-mpi,hdf5-output
+```
+
+These commands use the existing installed dependencies and lockfile; no dependency
+upgrade is required. User-specific direct-toolchain commands in the numerical
+envelope progress log are historical evidence, not general setup instructions.
+
 ## HPC systems
 
 Coming soon!

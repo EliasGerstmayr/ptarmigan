@@ -12,6 +12,7 @@ mod fast_focused_laser;
 mod plane_wave;
 mod fast_plane_wave;
 mod lcf;
+pub(crate) mod envelope;
 
 pub use self::focused_laser::*;
 pub use self::fast_focused_laser::*;
