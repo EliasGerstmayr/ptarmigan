@@ -14,7 +14,7 @@ impl UniformAxis {
     /// Residual tolerance is 1e-10 of a cell plus eight coordinate-roundoff units.
     /// Axes with roundoff allowance above 1e-3 of a cell are rejected.
     /// Supplied nodes are not retained. Reconstruction can round even the last
-    /// endpoint; future sampling bounds are the canonical coordinates returned
+    /// endpoint; sampling bounds are the canonical coordinates returned
     /// by `coordinate(0)` and `coordinate(len - 1)`, not the supplied endpoints.
     pub fn try_from_coordinates(nodes: &[f64]) -> Result<Self, GridError> {
         let invalid = |reason| GridError::Axis {

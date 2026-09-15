@@ -2,16 +2,21 @@
 //!
 //! All coordinates are metres; values are dimensionless S = a_rms^2, with
 //! polarization averaging already applied. This module does not implement Field.
-//! Future sampling must return the raised laboratory gradient
-//! (S_xi, -S_x, -S_y, -S_z + S_xi), in inverse metres.
+//! Sampling returns stored-coordinate derivatives (S_x, S_y, S_z, S_xi),
+//! in inverse metres. Laboratory-gradient conversion is not implemented.
 
 // The grid is intentionally not connected to a simulation field yet.
 #![allow(dead_code)]
 
 mod error;
 mod grid;
+mod multilinear;
 
 pub use error::GridError;
 // Public entry points are reserved for the next interpolation/integration steps.
 #[allow(unused_imports)]
+pub use error::SampleError;
+#[allow(unused_imports)]
 pub use grid::{EnvelopeGrid, EnvelopeMetadata, UniformAxis};
+#[allow(unused_imports)]
+pub use multilinear::StoredEnvelopeSample;

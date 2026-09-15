@@ -55,3 +55,52 @@ impl fmt::Display for GridError {
 }
 
 impl std::error::Error for GridError {}
+
+/// Invalid sampling query. Axis indices refer to (x, y, z, xi).
+#[derive(Debug, PartialEq)]
+pub enum SampleError {
+    NonFiniteCoordinate {
+        axis: usize,
+        coordinate: f64,
+    },
+    OutOfDomain {
+        axis: usize,
+        coordinate: f64,
+        min: f64,
+        max: f64,
+    },
+}
+
+impl fmt::Display for SampleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let axis_name = |axis: usize| {
+            ["x", "y", "z", "xi"]
+                .get(axis)
+                .copied()
+                .unwrap_or("unknown")
+        };
+        match self {
+            Self::NonFiniteCoordinate { axis, coordinate } => write!(
+                f,
+                "nonfinite {} coordinate: {} (expected finite metres)",
+                axis_name(*axis),
+                coordinate
+            ),
+            Self::OutOfDomain {
+                axis,
+                coordinate,
+                min,
+                max,
+            } => write!(
+                f,
+                "{} coordinate {} m is outside canonical domain [{}, {}] m",
+                axis_name(*axis),
+                coordinate,
+                min,
+                max
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SampleError {}

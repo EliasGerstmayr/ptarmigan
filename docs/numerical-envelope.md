@@ -4,8 +4,9 @@
 
 `src/field/envelope/` holds an envelope-specific numerical core, independent of
 HDF5 and of the `Field` trait. Existing field implementations are unchanged.
-Only validated construction, read-only metadata/storage access, and node indexing
-are implemented. There is no interpolated sampling or simulation input yet.
+Validated construction, read-only metadata/storage access, node indexing and
+stored-coordinate multilinear sampling are implemented. There is no simulation
+input or laboratory-coordinate sampling yet.
 
 `UniformAxis::try_from_coordinates` accepts at least two finite, strictly
 increasing, uniformly spaced nodes. Coordinates are metres. It stores the origin,
@@ -18,7 +19,7 @@ finite and positive. These are numerical validation rules, not physics tolerance
 
 The canonical grid is authoritative: supplied nodes are discarded after validation.
 Even the reconstructed final coordinate can differ slightly from the supplied
-endpoint through floating-point rounding. Future interpolation bounds will be
+endpoint through floating-point rounding. Interpolation bounds are
 `coordinate(0)` and `coordinate(len - 1)`, inclusive, on each axis. Supplied scalar
 samples are associated with these canonical nodes; preserving the original node
 coordinates exactly is not part of this representation's contract.
@@ -37,6 +38,67 @@ the vector without copying. A future file reader must check resource limits
 before allocating; this in-memory constructor receives already allocated data.
 All fields are private and exposed through immutable accessors. Invalid node
 indices return `None`. Errors identify the offending axis or flat scalar index.
+
+## Implemented: stored-coordinate sampling
+
+`EnvelopeGrid::sample_stored(point: [f64; 4])` returns
+`Result<StoredEnvelopeSample, SampleError>`:
+
+```rust
+let sample = grid.sample_stored([x, y, z, xi])?;
+let s = sample.a_sqd;
+let [s_x, s_y, s_z, s_xi] = sample.derivatives;
+```
+
+The query is already in `(x,y,z,xi)` coordinates, in metres. Derivatives hold
+the other stored coordinates fixed and have units of inverse metres. They are
+not a laboratory four-vector. S is already polarization-averaged and is not
+rescaled. Sampling borrows existing validated storage without copying arrays or
+allocating on the heap; the enclosing cell's 16 values use stack storage.
+
+`SampleError` is separate from malformed-grid `GridError`. Its variants are
+`NonFiniteCoordinate { axis, coordinate }` and
+`OutOfDomain { axis, coordinate, min, max }`, with axis indices in `(x,y,z,xi)`
+order and axis names in error messages. If several axes are invalid, the first
+in this order is reported.
+
+For each cell, `u=(q-q_lower)/spacing` defines lower/upper weights `1-u,u`.
+The value is the sum of the 16 corner values times four weights. Implementation
+uses nested linear combinations, algebraically the same product-weight sum.
+For each derivative, replacing its axis weight with `-1/spacing,+1/spacing`
+gives eight weighted edge differences. Pairing the terms before division removes
+a common offset and makes constant-data derivatives exactly zero. Derivatives
+use the same corners and fractions as the value, not finite-differenced samples
+or separately interpolated derivative arrays.
+
+The canonical domain is closed. Bounds are checked with strict comparisons
+before any division; nonfinite coordinates and out-of-domain queries are rejected.
+At an exact upper bound use the last cell with fraction one. Otherwise estimate
+the cell by division, then check and adjust against canonical node coordinates.
+An exact interior knot uses the cell on its positive side at fraction zero;
+neighbouring representable queries retain their own cells. There is no tolerance
+that expands coverage or snaps query coordinates to knots.
+
+After strict bounds and cell checks, the computed fraction is capped at one
+only if canonical reconstruction/subtraction/division rounded it above one.
+This arithmetic safeguard changes neither query coordinates nor cell selection.
+It prevents negative lower weights from roundoff; it is not an out-of-domain
+clamp. The exact upper endpoint is handled explicitly rather than relying on
+division to produce one. Floating-point reconstruction and weight arithmetic
+still limit endpoint/continuity accuracy; no bit-exact continuity is promised.
+
+A supplied endpoint equal to a canonical bound is a boundary sample. One lying
+inside is an interior sample; one outside returns `OutOfDomain`, even if the
+difference arose during reconstruction. Tests cover inward/outward upper-bound
+movement and adjacent representable queries on every axis.
+
+Multilinear values are continuous in exact arithmetic and gradients generally
+jump at cell boundaries. Nonnegative nodes give convex interpolated values up
+to floating-point arithmetic. Extremely large values or very small spacings
+can overflow derivative arithmetic despite finite input validation; these tests
+cover well-conditioned physical scales, not arbitrary f64 extremes. No claim of
+Gaussian convergence, trajectory accuracy or production suitability follows
+from exact-function tests. Coverage does not determine particle termination.
 
 ## Physics conventions
 
@@ -58,7 +120,7 @@ Here `S_z` holds stored xi fixed. It must not be eliminated using a plane-wave
 relation. This matches the LMA pusher's `c * grad_a_sqd / 2` force convention.
 The future constant axial wavevector is physical `2*pi/lambda * (1,0,0,1)` in
 inverse metres; event routines use `kappa = c * COMPTON_TIME * k` instead.
-Neither gradient conversion nor wavevector evaluation is implemented in step 1.
+Neither laboratory-gradient conversion nor wavevector evaluation is implemented.
 
 Reinspection of `FocusedLaser::a_sqd`, `envelope_and_grad` and `grad_a_sqd`
 identifies a **source-level discrepancy awaiting numerical verification**.
@@ -73,23 +135,8 @@ gradient (see validation). Do not alter native physics or force agreement here.
 
 ## Remaining milestone 1 work
 
-1. Multilinear interpolation of the same 16 corners for value and derivatives.
-2. Laboratory-coordinate conversion, tested with independent stored-z evolution.
-3. Versioned HDF5 input behind proposed `hdf5-input = ["dep:hdf5-writer"]`.
-
-Planned coverage is the closed rectangular domain of canonical coordinates. At the upper endpoint use the
-last cell; at interior knots choose the cell on the positive side. Derivatives
-are one-sided there. Outside and nonfinite queries return explicit errors;
-coverage does not determine particle termination. These policies are not yet
-implemented by the node-only API.
-
-Test supplied and canonical endpoints separately in the future interpolator.
-A supplied endpoint equal to a canonical bound is a boundary sample. One lying
-strictly inside is an ordinary interior sample; one outside is out of domain,
-even if the difference arose during reconstruction. Test immediately adjacent
-representable coordinates on both sides of the canonical bounds as well. The
-axis-construction tolerance is not a sampling tolerance: do not widen coverage
-or silently clamp genuinely out-of-domain coordinates.
+1. Laboratory-coordinate conversion, tested with independent stored-z evolution.
+2. Versioned HDF5 input behind proposed `hdf5-input = ["dep:hdf5-writer"]`.
 
 Proposed v1 HDF5 group `/envelope` contains scalar datasets `format`, `version`,
 `coordinates`, `axis_order`, `storage_order`, `normalization`, `polarization`,

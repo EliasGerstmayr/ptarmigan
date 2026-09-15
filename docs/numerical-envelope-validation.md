@@ -16,22 +16,46 @@ Seven unit tests in `src/field/envelope/grid.rs` cover:
   spacing stay close to independently specified physical values, remain increasing,
   and the reconstructed upper endpoint differs from the supplied endpoint.
 
-Run results are recorded in [progress](numerical-envelope-progress.md). Tests of
-node indices do not verify continuous out-of-domain sampling, which is unimplemented.
+Run results are recorded in [progress](numerical-envelope-progress.md). The node
+tests alone do not verify interpolation; separate sampling tests follow.
+
+## Stored-coordinate interpolation checks
+
+Nine tests in `src/field/envelope/multilinear.rs` cover:
+
+- Constant positive S at off-grid points and endpoints; exactly zero derivatives
+  from paired identical nodal values.
+- Independent affine references with distinct coefficients, shifted origins,
+  unequal spacings and `[2,3,4,5]` axis lengths.
+- A positive product of four affine factors, with derivatives formed analytically
+  from products of the other three factors, exercising mixed-axis weights.
+- Micrometre-scale affine data with coefficients of order `1e5` to `1e6 /m`.
+- Separate xi-only and stored-z-only data, checking all derivative components.
+- Piecewise nodal slopes differing at each knot on each axis: exact canonical
+  knots select the positive side; adjacent floating-point queries retain the
+  appropriate side; the upper endpoint selects the final cell at fraction one.
+- All 16 endpoint corners, faces, and immediately inside/outside representable
+  coordinates along every axis of a shifted, rounded grid.
+- Supplied upper endpoints inside and outside reconstructed canonical bounds,
+  with both movement directions explicitly checked by the fixtures.
+- NaN and both infinities on every axis; error variants, axis identification,
+  and informative out-of-domain messages.
+
+Tolerance helper: `128 * f64::EPSILON * scale`. The fixtures have well-resolved
+cells and moderate values; this allowance covers accumulated corner arithmetic
+and cancellation. Scale is a bound on S for values and that bound divided by
+spacing for derivatives, reflecting subtraction conditioning. Constant
+derivatives and cell indices/fractions at exact knots are tested exactly.
+No relative division by a zero derivative is used. These tests verify exact
+functions and boundary semantics; they do not measure physics accuracy,
+convergence order or performance. See progress for actual commands/results.
 
 ## Planned gates (not yet verified)
 
-Interpolation: constant S; affine derivatives `(2,3,5,7)` yielding raised lab
-gradient `(7,-2,-3,2)`; positive multi-affine mixed terms; exact cell endpoints
-and internal knots. Test xi-only and stored-z-only profiles separately.
+Laboratory conversion: affine stored derivatives `(2,3,5,7)` must yield raised
+lab gradient `(7,-2,-3,2)`. Test xi-only and stored-z-only profiles separately.
 Use laboratory finite differences with ct held fixed while changing laboratory z.
-
-The future sampling domain uses canonical endpoints. Test both supplied and
-canonical endpoints, including fixtures where reconstruction moves the upper
-bound inward and outward, and immediately adjacent representable coordinates.
-Canonical bounds are inclusive; supplied endpoints are classified by their actual
-position relative to those bounds (boundary, interior, or out of domain). Do not
-reuse axis-validation tolerances to expand the domain or silently clamp queries.
+These conversion checks remain separate from the completed stored-coordinate tests.
 
 Gaussian: reproducible off-grid points, both polarizations, symmetry planes,
 translated profiles and nonzero origins. Independently finite-difference the
@@ -72,4 +96,4 @@ Performance: ignored release tests for `gaussian_convergence` and `sampling_cost
 will use warm-up, precomputed coherent/random queries, black_box, repeated batches,
 and median ns/sample. Measure generation/loading separately. Report allocation
 and peak memory, releasing each resolution before generating the next. No field
-sampling or convergence measurements exist in step 1.
+sampling cost or Gaussian convergence measurements exist yet.
