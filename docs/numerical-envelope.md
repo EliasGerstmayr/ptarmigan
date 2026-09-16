@@ -5,8 +5,8 @@
 `src/field/envelope/` holds an envelope-specific numerical core, independent of
 HDF5 and of the `Field` trait. Existing field implementations are unchanged.
 Validated construction, read-only metadata/storage access, node indexing and
-stored-coordinate multilinear sampling are implemented. There is no simulation
-input or laboratory-coordinate sampling yet.
+stored-coordinate multilinear sampling and laboratory-coordinate sampling are
+implemented. There is no simulation input or Field integration yet.
 
 `UniformAxis::try_from_coordinates` accepts at least two finite, strictly
 increasing, uniformly spaced nodes. Coordinates are metres. It stores the origin,
@@ -56,7 +56,7 @@ not a laboratory four-vector. S is already polarization-averaged and is not
 rescaled. Sampling borrows existing validated storage without copying arrays or
 allocating on the heap; the enclosing cell's 16 values use stack storage.
 
-`SampleError` is separate from malformed-grid `GridError`. Its variants are
+`SampleError` is separate from malformed-grid `GridError`. Stored query variants are
 `NonFiniteCoordinate { axis, coordinate }` and
 `OutOfDomain { axis, coordinate, min, max }`, with axis indices in `(x,y,z,xi)`
 order and axis names in error messages. If several axes are invalid, the first
@@ -100,6 +100,48 @@ cover well-conditioned physical scales, not arbitrary f64 extremes. No claim of
 Gaussian convergence, trajectory accuracy or production suitability follows
 from exact-function tests. Coverage does not determine particle termination.
 
+## Implemented: laboratory sampling
+
+`EnvelopeGrid::sample_lab(r: FourVector) -> Result<LabEnvelopeSample, SampleError>`
+accepts `(ct,x,y,z)` in metres and delegates to `sample_stored([x,y,z,ct-z])`.
+It does not duplicate or modify interpolation. The result type is distinct from
+`StoredEnvelopeSample`:
+
+```rust
+let r = FourVector::new(ct, x, y, z);
+let sample = grid.sample_lab(r)?;
+let s = sample.a_sqd;
+let grad = sample.grad_a_sqd; // (d/d(ct), -d/dx, -d/dy, -d/dz) S
+```
+
+The chain rule at fixed laboratory position gives `dS/d(ct)=S_xi`. Varying
+laboratory z at fixed ct changes both stored z and xi, giving `dS/dz=S_z-S_xi`.
+Raising the derivative index with the `(+---)` metric gives
+`(S_xi,-S_x,-S_y,-S_z+S_xi)`. All components are inverse metres; the first is a
+ct derivative, not a time derivative, so no factor of c is introduced. S remains
+dimensionless and already cycle-averaged. This preserves independent stored-z
+evolution rather than imposing a plane-wave relation.
+
+The API validates every laboratory coordinate before transforming or sampling.
+Errors distinguish:
+
+- `NonFiniteLabCoordinate { component, coordinate }`: invalid input, with
+  component order `(ct,x,y,z)` and laboratory names in messages.
+- `NonFiniteXi { ct, z }`: overflow of `ct-z` despite finite operands.
+- `TransformedOutOfDomain { position, axis, coordinate, min, max }`: the original
+  laboratory position maps outside the canonical stored domain. Axis order here
+  is `(x,y,z,xi)`; messages explicitly identify xi as derived from ct-z.
+- `NonFiniteResult { quantity, value }`: a nonfinite scalar, stored derivative
+  or raised-gradient component. In particular, finite stored derivatives can
+  overflow in `-S_z+S_xi`. Checks run before returning a laboratory sample.
+
+No arbitrary amplitude/gradient thresholds are imposed. Stored sampling's existing
+arithmetic is unchanged; the laboratory wrapper rejects nonfinite results rather
+than repairing them. Rounding in ct-z follows ordinary f64 arithmetic, and its
+result must satisfy strict canonical bounds. There is no domain expansion,
+position clamp, zero padding, or particle-termination rule. The wrapper inherits
+the stored interpolant's knot policy and discontinuous cellwise derivatives.
+
 ## Physics conventions
 
 Stored values are dimensionless `S = a_rms^2`. Cycle averaging is already applied:
@@ -109,7 +151,7 @@ polarization and a positive finite reference wavelength in metres. Construction
 does not rescale S. Coordinate and normalization conventions are fixed by the
 type contract; unsupported alternatives cannot be selected in memory.
 
-Ptarmigan positions are `(ct,x,y,z)` in metres, with metric `(+---)`. The planned
+Ptarmigan positions are `(ct,x,y,z)` in metres, with metric `(+---)`. The implemented
 sampling coordinate is `(x,y,z,ct-z)`. The chain rule gives the raised gradient
 
 ```text
@@ -120,7 +162,7 @@ Here `S_z` holds stored xi fixed. It must not be eliminated using a plane-wave
 relation. This matches the LMA pusher's `c * grad_a_sqd / 2` force convention.
 The future constant axial wavevector is physical `2*pi/lambda * (1,0,0,1)` in
 inverse metres; event routines use `kappa = c * COMPTON_TIME * k` instead.
-Neither laboratory-gradient conversion nor wavevector evaluation is implemented.
+Laboratory-gradient conversion is implemented; wavevector evaluation remains pending.
 
 Reinspection of `FocusedLaser::a_sqd`, `envelope_and_grad` and `grad_a_sqd`
 identifies a **source-level discrepancy awaiting numerical verification**.
@@ -135,8 +177,7 @@ gradient (see validation). Do not alter native physics or force agreement here.
 
 ## Remaining milestone 1 work
 
-1. Laboratory-coordinate conversion, tested with independent stored-z evolution.
-2. Versioned HDF5 input behind proposed `hdf5-input = ["dep:hdf5-writer"]`.
+1. Versioned HDF5 input behind proposed `hdf5-input = ["dep:hdf5-writer"]`.
 
 Proposed v1 HDF5 group `/envelope` contains scalar datasets `format`, `version`,
 `coordinates`, `axis_order`, `storage_order`, `normalization`, `polarization`,

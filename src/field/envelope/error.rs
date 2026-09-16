@@ -56,7 +56,8 @@ impl fmt::Display for GridError {
 
 impl std::error::Error for GridError {}
 
-/// Invalid sampling query. Axis indices refer to (x, y, z, xi).
+/// Sampling failure. Stored axis indices refer to (x, y, z, xi);
+/// laboratory component indices refer to (ct, x, y, z).
 #[derive(Debug, PartialEq)]
 pub enum SampleError {
     NonFiniteCoordinate {
@@ -69,6 +70,25 @@ pub enum SampleError {
         min: f64,
         max: f64,
     },
+    NonFiniteLabCoordinate {
+        component: usize,
+        coordinate: f64,
+    },
+    NonFiniteXi {
+        ct: f64,
+        z: f64,
+    },
+    TransformedOutOfDomain {
+        position: [f64; 4],
+        axis: usize,
+        coordinate: f64,
+        min: f64,
+        max: f64,
+    },
+    NonFiniteResult {
+        quantity: &'static str,
+        value: f64,
+    },
 }
 
 impl fmt::Display for SampleError {
@@ -80,6 +100,16 @@ impl fmt::Display for SampleError {
                 .unwrap_or("unknown")
         };
         match self {
+            Self::NonFiniteLabCoordinate { component, coordinate } => write!(f,
+                "nonfinite laboratory {} coordinate: {} (expected finite metres)",
+                ["ct", "x", "y", "z"].get(*component).unwrap_or(&"unknown"), coordinate),
+            Self::NonFiniteXi { ct, z } => write!(f,
+                "nonfinite transformed xi = ct - z from finite laboratory ct={} m, z={} m", ct, z),
+            Self::TransformedOutOfDomain { position, axis, coordinate, min, max } => write!(f,
+                "laboratory (ct,x,y,z)={:?} m maps via xi=ct-z to stored {}={} m outside canonical domain [{}, {}] m",
+                position, axis_name(*axis), coordinate, min, max),
+            Self::NonFiniteResult { quantity, value } => write!(f,
+                "cannot return laboratory envelope sample: nonfinite {} result ({})", quantity, value),
             Self::NonFiniteCoordinate { axis, coordinate } => write!(
                 f,
                 "nonfinite {} coordinate: {} (expected finite metres)",

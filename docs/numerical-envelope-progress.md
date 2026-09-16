@@ -166,3 +166,54 @@ radiation, Gaussian convergence, benchmark, cubic interpolation or wavevector
 evaluation is included. No dependencies or lockfile changed; no commit or push.
 Next bounded step is laboratory-coordinate sampling and raised-gradient conversion,
 after review of this interpolation diff.
+
+## Laboratory-coordinate sampling and raised gradient
+
+Started from clean `numerical-field-lma` at `8f14e1f`: the stored sampler had
+been committed. Inspected the envelope implementation, documentation, worktrees
+and repository instructions; no applicable AGENTS.md was found. Verified the
+`(+---)` metric in `FourVector::Mul` and metre-valued `(ct,x,y,z)` positions from
+the existing `c*u*dtau` position updates. Baseline remains at `9e7caf7`.
+
+Added `laboratory.rs` and exported `LabEnvelopeSample`. `sample_lab` reuses the
+stored interpolant at `[x,y,z,ct-z]` and returns `(S_xi,-S_x,-S_y,-S_z+S_xi)`.
+Extended `SampleError` to distinguish invalid laboratory inputs, transformed xi
+overflow, transformed-domain failures, and nonfinite output arithmetic. Updated
+design and validation documentation, including the explicitly pending benchmark
+checklist. No interpolation arithmetic or existing field physics was changed.
+
+Verification completed:
+
+| Check | Actual result |
+| --- | --- |
+| Focused release envelope tests | 26 matched, 26 passed, 0 failed; 132 unrelated tests filtered out. Includes 7 grid, 9 stored sampling and 10 laboratory tests. |
+| Default package release build | Passed, exit 0. |
+| rustfmt check on all five envelope Rust files | Passed. |
+| git diff --check and explicit whitespace check including the new file | Passed. |
+| Dependency/lockfile, native field and stored interpolation diffs | Unchanged. |
+| Read-only baseline status | Clean detached HEAD. |
+
+The laboratory tests include independent finite differences at three steps,
+coordinate mappings and finite-input overflow cases. Synthetic nonfinite samples
+also test the result guard directly. Tests use mathematical fixtures, not particle
+simulations. All requested checks ran; none was blocked. Output includes existing
+code warnings and the historical nonfatal rust-objcopy/libLLVM build-script warning.
+
+Actual verification commands:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
+cargo build --locked --release -p ptarmigan --no-default-features
+rustfmt --edition 2018 --check src/field/envelope/mod.rs src/field/envelope/grid.rs src/field/envelope/error.rs src/field/envelope/multilinear.rs src/field/envelope/laboratory.rs
+git diff --check
+git diff --exit-code -- Cargo.lock Cargo.toml src/field/focused_laser.rs src/field/fast_focused_laser.rs src/field/numerical/ src/field/envelope/grid.rs src/field/envelope/multilinear.rs
+git --no-optional-locks -C ../ptarmigan-baseline status --short --branch
+```
+
+No physical simulation, large convergence study or benchmark was launched. Native
+Gaussian discrepancy verification remains pending, as do the Gaussian, memory/cost,
+trajectory, radiation, LASY, flying-focus, LCFA and finite-beam benchmarks listed
+in the validation document. No dependency or lockfile changes, commit or push.
+
+Suggested commit message: `feat(field): add laboratory envelope sampling and raised gradient`.

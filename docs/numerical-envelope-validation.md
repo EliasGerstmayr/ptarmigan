@@ -50,12 +50,58 @@ No relative division by a zero derivative is used. These tests verify exact
 functions and boundary semantics; they do not measure physics accuracy,
 convergence order or performance. See progress for actual commands/results.
 
-## Planned gates (not yet verified)
+## Laboratory-coordinate checks
 
-Laboratory conversion: affine stored derivatives `(2,3,5,7)` must yield raised
-lab gradient `(7,-2,-3,2)`. Test xi-only and stored-z-only profiles separately.
-Use laboratory finite differences with ct held fixed while changing laboratory z.
-These conversion checks remain separate from the completed stored-coordinate tests.
+Ten focused tests in `laboratory.rs` cover:
+
+- Constant S with zero gradient; shifted unequal axes with stored affine
+  derivatives `(2,3,5,7)` and raised lab gradient `(7,-2,-3,2)`.
+- Xi-only values, including equal simultaneous ct/z shifts; stored-z-only values
+  and gradients, including time independence at fixed laboratory z.
+- Known micrometre-scale laboratory and independently specified stored points.
+- Independent central differences of the sampled scalar in each laboratory
+  coordinate, at two interior points of a positive multi-affine fixture. Perturbing
+  laboratory z holds ct fixed. Three steps `h=1e-2,1e-3,1e-4 m` stay in the same
+  cells of metre-scale mathematical grids. These are small mathematical fixtures,
+  not physical simulations or convergence studies.
+- All 16 transformed canonical endpoint corners, with binary-exact boundary
+  arithmetic checked independently; outside queries on every stored axis and a
+  representable point immediately beyond the transformed xi upper bound.
+- NaN and both infinities in every laboratory input; both signs of ct-z overflow;
+  error variants and diagnostic context.
+- End-to-end derivative overflow from finite nodal inputs, and longitudinal
+  conversion overflow despite finite stored derivatives.
+- Direct result-guard tests using synthetic nonfinite scalars and derivatives,
+  clearly separate from the end-to-end overflow tests; a large finite scalar is
+  accepted without imposing an arbitrary physical limit.
+
+Direct analytical checks use `128*EPSILON*scale`, with S or S/cell-width scales
+to allow accumulated interpolation/subtraction roundoff. The finite-difference
+fixture is linear along laboratory ct/x/y and quadratic along laboratory z;
+central differences have zero truncation error in exact arithmetic. Its error
+bound is `128*EPSILON*40/h`, where 40 bounds the scalar magnitude in the fixture,
+to allow roundoff amplification as h shrinks. These checks verify the chain rule
+and sign/unit conventions without calling the derivative transformation in the
+reference calculation. They establish no Gaussian or trajectory accuracy.
+
+## Pending benchmarks (not run)
+
+Simulation runs will be performed separately by the user. None of these items
+is marked complete by the exact-function or finite-difference tests:
+
+- [ ] Analytical Gaussian values and all gradient components.
+- [ ] Three-resolution Gaussian convergence.
+- [ ] Independent numerical check of the native Gaussian time-gradient discrepancy.
+- [ ] Sampling cost and memory measurements.
+- [ ] Radiation-free trajectories.
+- [ ] LMA radiation.
+- [ ] LASY Gaussian and matched-history flying-focus comparisons.
+- [ ] Later LCFA and finite-beam validation.
+
+Matched-history comparisons isolate local radiation calculations; they do not
+reproduce spatial gradients or finite-beam dynamics.
+
+## Remaining validation design (not yet verified)
 
 Gaussian: reproducible off-grid points, both polarizations, symmetry planes,
 translated profiles and nonzero origins. Independently finite-difference the
