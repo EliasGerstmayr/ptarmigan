@@ -194,23 +194,77 @@ Reuse the local HDF5 reader. Its array read scatters the first dimension over
 the communicator, so the initial loader must require a single-rank communicator.
 No new HDF5 binding, MPI distribution scheme, or CLI input is needed yet.
 
-## Milestone 2 and later
+## Implemented Gaussian validation tooling (test-only)
 
-Generate an independent analytical Gaussian using `W=1+z^2/z_R^2`,
-`z_R=pi*w0^2/lambda`, and intensity FWHM T:
+`src/field/envelope/validation/` is compiled only with `cfg(test)`. It separates
+the reference (`gaussian.rs`), canonical grid builder (`grid.rs`), error statistics
+(`statistics.rs`), CSV/metadata generation (`report.rs`), configurable study
+(`runner.rs`) and native diagnostic (`native.rs`). Ignored tests expose the two
+runners without changing the binary interface or adding dependencies.
+
+The independent stationary Gaussian reference uses
+`X=x-x_c`, `Y=y-y_c`, `Z=z-z_f`, `Xi=xi-xi_c`, `W=1+Z^2/z_R^2`,
+`z_R=pi*w0^2/lambda`, `L=c*T`, with T the intensity FWHM:
 
 ```text
-S = C_pol*a0^2/W * exp(-2*(x^2+y^2)/(w0^2*W) - 4*ln(2)*xi^2/(c*T)^2)
-S_x  = -4*x*S/(w0^2*W)
-S_y  = -4*y*S/(w0^2*W)
-S_xi = -8*ln(2)*xi*S/(c*T)^2
-S_z  = 2*z/(z_R^2*W) * (2*(x^2+y^2)/(w0^2*W)-1) * S
+S = C_pol*a0^2/W * exp(-2*(X^2+Y^2)/(w0^2*W) - 4*ln(2)*Xi^2/L^2)
+S_x  = -4*X*S/(w0^2*W)
+S_y  = -4*Y*S/(w0^2*W)
+S_xi = -8*ln(2)*Xi*S/L^2
+S_z  = 2*Z/(z_R^2*W) * (2*(X^2+Y^2)/(w0^2*W)-1) * S
 ```
 
-Use native Gaussian evaluation only as an additional comparison, with
-`n_cycles=c*T/lambda`. Measure three-resolution convergence and sampling cost.
-Expected multilinear orders are two for values and one for gradients; they are
-not measured results yet. Scalar storage is `8*nx*ny*nz*nxi` bytes.
+The reference independently constructs `(S_xi,-S_x,-S_y,-S_z+S_xi)` without
+calling the production laboratory conversion. Its scalar is independently
+finite-differenced in small tests. Source inspection confirms native factors
+`C_pol=1/2` for linear and `1` for circular, with `n_cycles=c*T/lambda` matching
+the native Gaussian intensity duration. The reference requires positive finite
+wavelength, waist, duration and a0, finite offsets and representable derived
+scales. Zero a0 is excluded specifically because normalized validation requires
+a positive S_peak; this is not a new production-field restriction.
+
+`xi_c` is a retarded-coordinate offset, not a laboratory time. The pulse peak at
+the focus occurs at `ct=z_f+xi_c`. Moving z_f alone does not generally keep that
+peak at ct=0; choose `xi_c=-z_f` to do so.
+
+Grid values are evaluated at canonical reconstructed coordinates. Count/byte
+arithmetic and a configurable scalar-memory budget are checked before allocation;
+estimated scalar storage is printed before construction. Each grid is dropped
+before constructing the next resolution. The budget covers the scalar Vec, not
+process peak memory, coordinate vectors or the reusable query list.
+
+The convergence runner generates deterministic interior points once using the
+existing Xoshiro256StarStar RNG. Candidates lie in 95% of the configured domain,
+exclude symmetry planes and knots of every requested resolution, and are reused
+for both polarizations. It round-trips through ct=z+xi then xi=ct-z and uses that
+effective stored point for the analytical and numerical evaluations. Production
+domain rules are unchanged. `queries.csv` records the actual physical queries.
+
+`errors.csv` reports max/RMS absolute and characteristic-scale-normalized errors
+for S, four stored derivatives and four laboratory components. Rates use the
+actual successive cell-count ratio; zero/nonfinite errors or missing previous
+data give `NA`. Nonfinite measurements abort a study instead of producing a
+misleading success. Expected asymptotic orders (value 2, gradients 1) are not
+assertions. Provisional maximum normalized targets are 1e-3 for S and 1e-2 for
+gradients. Misses are reported without automatic refinement.
+
+The separate native diagnostic uses an unshifted reference, both polarizations,
+on-axis z=z_R/2 at xi=0, and a generic nonzero-xi/off-axis point. It writes scalar,
+full-gradient and native-scalar finite-difference comparisons at three steps.
+Disagreement is diagnostic output, not a failing regression assertion. This
+diagnostic is implemented but has not been run; the source-level native-gradient
+discrepancy still awaits numerical verification.
+
+Output includes human-readable summaries, CSVs, and `metadata.txt` containing
+runtime Git commit/dirty state, compile-time Git/features, physical parameters,
+domain/offsets, seed/algorithm, normalization, allocation estimates and diagnostic
+identity. Status is appended: only a final `run_status=completed` indicates success.
+Files are created exclusively; reuse requires a fresh output directory. Default
+outputs live under the already ignored `/output/`. No output data is committed.
+
+See [validation commands and configuration](numerical-envelope-validation.md#gaussian-tooling-commands)
+and [progress](numerical-envelope-progress.md) for actual runs. Full Gaussian
+convergence and measured sampling cost/peak memory remain pending.
 
 Defer smooth tensor-product cubic interpolation until after the reference is
 validated. A shared-slope cubic candidate uses four nodes per axis (256 samples),

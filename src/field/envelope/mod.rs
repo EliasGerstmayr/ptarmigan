@@ -13,6 +13,9 @@ mod grid;
 mod laboratory;
 mod multilinear;
 
+#[cfg(test)]
+mod validation;
+
 pub use error::GridError;
 // Public entry points are reserved for the next interpolation/integration steps.
 #[allow(unused_imports)]

@@ -217,3 +217,61 @@ trajectory, radiation, LASY, flying-focus, LCFA and finite-beam benchmarks liste
 in the validation document. No dependency or lockfile changes, commit or push.
 
 Suggested commit message: `feat(field): add laboratory envelope sampling and raised gradient`.
+
+## 2026-09-16: analytical Gaussian validation tooling
+
+Started from clean `numerical-field-lma` at `e670c3f`. The laboratory sampler was
+already committed. Inspected envelope source, design/validation/progress documents,
+Cargo/features and native Gaussian source; no applicable AGENTS.md was found.
+Baseline remains at `9e7caf7`. Production samplers, native physics, dependencies
+and Cargo.lock are unchanged.
+
+Added test-only `validation/{mod,gaussian,grid,statistics,runner,report,native}.rs`
+and its cfg(test) registration. The reference supports independent transverse,
+focus and retarded-time offsets; normalized validation requires positive a0.
+Native source confirms linear/circular averaging 1/2 and 1 and the duration
+mapping n_cycles=c*T/lambda. No native diagnostic was run to verify its pending
+time-gradient discrepancy numerically.
+
+Implemented two ignored runners with ENVELOPE_* configuration, exclusive output
+files, CSVs plus metadata, deterministic query reuse, canonical grid evaluation,
+checked memory budget and sequential grid release. Full study and diagnostic
+commands are documented in the validation guide. Expected orders and engineering
+targets are reports, not forced assertions or automatic refinement triggers.
+
+Actual checks:
+
+| Check | Result |
+| --- | --- |
+| Focused release envelope tests | 37 matched: 35 passed, 0 failed, 2 ignored; 132 unrelated tests filtered out. Includes 9 new small tests. |
+| Tiny Gaussian runner smoke | 1 matched, 1 passed; 168 filtered out. Native diagnostic not invoked. |
+| Default package release build | Passed, exit 0. |
+| CSV/metadata serialization inspection | Passed: 54 error rows, 24 axis rows, 16 queries, finite metrics, NA first rates and actual ratios 1.5 and 4/3. Metadata records completion and native-not-run. |
+| Formatting and whitespace | rustfmt --check and git diff --check passed; explicit whitespace check includes every new validation file. |
+| Production/dependency/lockfile diff and baseline status | Production samplers, native fields and dependencies unchanged; baseline clean. |
+
+Smoke invocation used cells=2,3,4, samples=16, seed=20260916, memory ceiling=1 MiB,
+default physical parameters (lambda=0.8 um, w0=5 um, T=30 fs, a0=1, zero offsets),
+extent=2 and both polarizations. Largest scalar allocation was 5,000 bytes.
+Output directory: `/private/tmp/ptarmigan-gaussian-smoke-20260916`. This was solely
+an invocation/serialization smoke; missed engineering targets and its measured
+coarse rates are not production accuracy/convergence evidence. No automatic
+refinement followed. The report's exact runtime source state is captured in its
+metadata; documentation was finalized after the smoke.
+
+Actual runner invocation:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+ENVELOPE_CELLS=2,3,4 ENVELOPE_SAMPLES=16 ENVELOPE_MAX_MIB=1 ENVELOPE_SEED=20260916 ENVELOPE_OUTPUT=/private/tmp/ptarmigan-gaussian-smoke-20260916 cargo test --locked --release -p ptarmigan --no-default-features field::envelope::validation::gaussian_convergence -- --ignored --exact --nocapture --test-threads=1
+cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
+cargo build --locked --release -p ptarmigan --no-default-features
+rustfmt --edition 2018 --check src/field/envelope/mod.rs src/field/envelope/validation/*.rs
+git diff --check
+```
+
+Existing code warnings and the nonfatal rust-objcopy/libLLVM build-script warning
+remain. No requested check was blocked. Full 16/32/64-cell study, native diagnostic, performance/peak-memory
+measurements and all particle/physics simulations were not run. No commit or push.
+
+Suggested commit message: `test(field): add analytical Gaussian validation tools`.
