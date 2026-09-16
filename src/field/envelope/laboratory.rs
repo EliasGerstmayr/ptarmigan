@@ -1,6 +1,6 @@
 //! Laboratory sampling; see [design](../../../docs/numerical-envelope.md#implemented-laboratory-sampling).
 
-use super::{EnvelopeGrid, SampleError, StoredEnvelopeSample};
+use super::{EnvelopeGrid, InterpolationMethod, SampleError, StoredEnvelopeSample};
 use crate::geometry::FourVector;
 
 /// Dimensionless S and its raised laboratory four-gradient, distinct from a stored sample.
@@ -11,7 +11,7 @@ pub struct LabEnvelopeSample {
     pub grad_a_sqd: FourVector,
 }
 
-fn finite(value: f64, quantity: &'static str) -> Result<(), SampleError> {
+pub(super) fn finite(value: f64, quantity: &'static str) -> Result<(), SampleError> {
     if value.is_finite() {
         Ok(())
     } else {
@@ -58,6 +58,16 @@ impl EnvelopeGrid {
     /// strict canonical bounds, and nonfinite arithmetic results are errors.
     /// No coordinate clamp, zero padding, or particle-termination policy is added.
     pub fn sample_lab(&self, r: FourVector) -> Result<LabEnvelopeSample, SampleError> {
+        self.sample_lab_with_method(r, InterpolationMethod::Multilinear)
+    }
+
+    /// Explicit interpolant, with the same coordinate conversion and finite checks.
+    /// Finite negative cubic samples are returned unchanged.
+    pub fn sample_lab_with_method(
+        &self,
+        r: FourVector,
+        method: InterpolationMethod,
+    ) -> Result<LabEnvelopeSample, SampleError> {
         let position = [r[0], r[1], r[2], r[3]];
         for (component, &coordinate) in position.iter().enumerate() {
             if !coordinate.is_finite() {
@@ -72,7 +82,7 @@ impl EnvelopeGrid {
             return Err(SampleError::NonFiniteXi { ct: r[0], z: r[3] });
         }
         let stored = self
-            .sample_stored([r[1], r[2], r[3], xi])
+            .sample_stored_with_method([r[1], r[2], r[3], xi], method)
             .map_err(|error| match error {
                 SampleError::OutOfDomain {
                     axis,

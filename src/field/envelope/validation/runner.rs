@@ -5,7 +5,10 @@ use super::{
     statistics::Errors,
     Result,
 };
-use crate::field::{envelope::UniformAxis, Polarization};
+use crate::field::{
+    envelope::{InterpolationMethod, UniformAxis},
+    Polarization,
+};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256StarStar;
 use std::{env, path::PathBuf, str::FromStr};
@@ -18,6 +21,7 @@ pub struct Config {
     pub limit: usize,
     pub extent: f64,
     pub output: PathBuf,
+    pub query_file: Option<PathBuf>,
 }
 
 fn setting<T: FromStr>(key: &str, default: T) -> Result<T> {
@@ -65,6 +69,7 @@ impl Config {
             Gaussian::new(params, pol)?;
         }
         Ok(Self {
+            query_file: env::var_os("ENVELOPE_QUERIES").map(PathBuf::from),
             params,
             cells,
             samples,
@@ -145,15 +150,40 @@ pub fn queries(
     Err("unable to generate requested interior points; check offsets/scales".into())
 }
 
+pub const METHODS: [InterpolationMethod; 2] =
+    [InterpolationMethod::Multilinear, InterpolationMethod::Cubic];
+pub fn method_name(method: InterpolationMethod) -> &'static str {
+    match method {
+        InterpolationMethod::Multilinear => "multilinear",
+        InterpolationMethod::Cubic => "cubic",
+    }
+}
+
+pub struct Measurements {
+    pub errors: [Errors; 9],
+    pub min_normalized: f64,
+    pub negatives: usize,
+    pub max_negative_excursion: f64,
+}
+
 pub fn evaluate(
     g: &Gaussian,
     grid: &crate::field::envelope::EnvelopeGrid,
     points: &[Query],
-) -> Result<[Errors; 9]> {
+    method: InterpolationMethod,
+) -> Result<Measurements> {
     let mut stats = [Errors::default(); 9];
+    let mut min_normalized = f64::INFINITY;
+    let mut negatives = 0;
     for q in points {
-        let stored = grid.sample_stored(q.stored)?;
-        let lab = grid.sample_lab(q.lab.into())?;
+        let stored = grid.sample_stored_with_method(q.stored, method)?;
+        let lab = grid.sample_lab_with_method(q.lab.into(), method)?;
+        let normalized = stored.a_sqd / g.peak;
+        if !normalized.is_finite() {
+            return Err("nonfinite sampled S/S_peak".into());
+        }
+        min_normalized = min_normalized.min(normalized);
+        negatives += usize::from(stored.a_sqd < 0.0);
         let reference = g.stored(q.stored);
         let reference_lab = g.lab(q.lab);
         stats[0].add(stored.a_sqd, reference[0])?;
@@ -162,22 +192,40 @@ pub fn evaluate(
             stats[i + 5].add(lab.grad_a_sqd[i as i32], reference_lab[i + 1])?;
         }
     }
-    Ok(stats)
+    Ok(Measurements {
+        errors: stats,
+        min_normalized,
+        negatives,
+        max_negative_excursion: (-min_normalized).max(0.0),
+    })
 }
 
 pub fn run() -> Result<()> {
     let c = Config::from_env("gaussian")?;
     for &n in &c.cells {
+        if n < 2 {
+            return Err("method comparison requires at least two cells per axis for cubic".into());
+        }
         grid::allocation(n, c.limit)?;
     }
     let geometry = Gaussian::new(c.params, Polarization::Linear)?;
-    let points = queries(&geometry, &c.cells, c.extent, c.samples, c.seed)?;
+    let points = match &c.query_file {
+        Some(path) => super::queries::parse(
+            &std::fs::read_to_string(path)?,
+            &geometry,
+            &c.cells,
+            c.extent,
+        )?,
+        None => queries(&geometry, &c.cells, c.extent, c.samples, c.seed)?,
+    };
     let mut report = Report::new(&c, "gaussian_convergence")?;
     report.queries(&points)?;
+    let mut signed_csv = report.file("samples.csv")?;
+    use std::io::Write;
+    writeln!(signed_csv,"method,polarization,cells,sample_count,sampled_min_S_over_peak,negative_sample_count,sampled_max_negative_excursion_over_peak")?;
     let mut csv = report.file("errors.csv")?;
     report.error_header(&mut csv)?;
     let mut axes_csv = report.file("axes.csv")?;
-    use std::io::Write;
     writeln!(
         axes_csv,
         "polarization,cells,axis,origin_m,spacing_m,nodes,canonical_upper_m,estimated_scalar_bytes"
@@ -185,18 +233,39 @@ pub fn run() -> Result<()> {
     for pol in [Polarization::Linear, Polarization::Circular] {
         let g = Gaussian::new(c.params, pol)?;
         report.gaussian(&g)?;
-        let mut previous = None;
+        let mut previous = [None, None];
         for &cells in &c.cells {
             let (_, bytes) = grid::allocation(cells, c.limit)?;
-            let stats = {
-                let grid = grid::build(&g, cells, c.extent, c.limit)?;
-                report.axes(&mut axes_csv, &g, &grid, cells, bytes)?;
-                evaluate(&g, &grid, &points)?
-            }; // grid dropped BEFORE constructing the next resolution
-            report.errors(&mut csv, &g, cells, bytes, &stats, previous.as_ref())?;
-            previous = Some((cells, stats));
-        }
+            let grid = grid::build(&g, cells, c.extent, c.limit)?;
+            report.axes(&mut axes_csv, &g, &grid, cells, bytes)?;
+            for (i, method) in METHODS.iter().copied().enumerate() {
+                let measured = evaluate(&g, &grid, &points, method)?;
+                report.errors(
+                    &mut csv,
+                    &g,
+                    method,
+                    cells,
+                    bytes,
+                    &measured.errors,
+                    previous[i].as_ref(),
+                )?;
+                writeln!(
+                    signed_csv,
+                    "{},{},{},{},{:.17e},{},{:.17e}",
+                    method_name(method),
+                    super::gaussian::polarization_name(pol),
+                    cells,
+                    points.len(),
+                    measured.min_normalized,
+                    measured.negatives,
+                    measured.max_negative_excursion
+                )?;
+                println!("{} {} cells={}: sampled min S/S_peak={:.6e}, negatives={}/{}, max negative excursion/S_peak={:.6e}", method_name(method),super::gaussian::polarization_name(pol),cells,measured.min_normalized,measured.negatives,points.len(),measured.max_negative_excursion);
+                previous[i] = Some((cells, measured.errors));
+            }
+        } // Both methods evaluated before this grid is released.
     }
+    signed_csv.flush()?;
     csv.flush()?;
     axes_csv.flush()?;
     report.finish()

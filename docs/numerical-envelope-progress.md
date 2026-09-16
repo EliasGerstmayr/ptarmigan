@@ -275,3 +275,154 @@ remain. No requested check was blocked. Full 16/32/64-cell study, native diagnos
 measurements and all particle/physics simulations were not run. No commit or push.
 
 Suggested commit message: `test(field): add analytical Gaussian validation tools`.
+
+## 2026-09-16: optional shared-slope cubic interpolation
+
+Started from clean `numerical-field-lma` at `6caf275`. Existing interfaces and
+repository instructions were inspected before editing. The baseline remains
+clean at `9e7caf7`. No native fields, tracking, radiation, dependencies, Cargo.lock
+or baseline files changed. No commit or push.
+
+Added `cubic.rs`: tensor-product Hermite interpolation, shared centred interior
+slopes and second-order one-sided endpoint slopes. Analytical derivative weights
+use the same polynomial, applied to differences from a common nodal value. Each
+axis uses three boundary or four interior nodes, with no per-sample heap allocation
+or persistent coefficient/derivative grids. `UnsupportedCubicAxis` rejects axes
+shorter than three nodes without fallback. Finite signed samples are intentional.
+
+`InterpolationMethod` and `sample_stored_with_method`/`sample_lab_with_method`
+provide explicit selection. Existing entry points remain multilinear. Its locator
+was exposed internally, without changing its arithmetic or boundary policy.
+Laboratory conversion and finite checks are shared. Stored coordinates are metres,
+xi=ct-z; S is dimensionless and already polarization-averaged. The raised (+---)
+gradient remains `(S_xi,-S_x,-S_y,-S_z+S_xi)` in inverse metres.
+
+The runner compares both methods before releasing each grid and tracks rates
+separately by method and polarization. New `validation/queries.rs` loads saved
+numeric CSVs with exact parsed xi=ct-z and strict coverage at every canonical grid.
+No repair, dropping, movement or regeneration is allowed. Metadata records source
+and actual count. Errors explicitly label sampled maxima/targets; `samples.csv`
+separately reports sampled minimum, negative count and negative excursion. The
+writer remains exclusive: old outputs are preserved.
+
+Read-only inspection of the user's existing `output/envelope-gaussian` confirms
+64-cell sampled normalized maxima S=2.328907913419442e-3 and
+S_xi=1.023691444531421e-1. Their last RMS orders are respectively 1.9872 and
+0.9658: expected multilinear convergence, but missed provisional sampled targets.
+Existing `output/envelope-native/native.csv` confirms a separate time-gradient
+discrepancy at the prepared points (linear on-axis peak: native 3259.493 /m versus
+zero analytical/fixed-position finite-difference time derivative). These are
+user-run historical results, not diagnostics rerun by this task. Trajectory
+consequences are not established. Earlier log entries retain their actual status
+at the time they were written.
+
+Actual checks:
+
+| Check | Result |
+| --- | --- |
+| Focused release envelope tests, final run | 44 matched: 42 passed, 0 failed, 2 ignored; 132 unrelated tests filtered out. Six new cubic tests and one query-loader test. |
+| Tiny saved-query comparison smoke | 1 matched, 1 passed, 175 filtered out; cells 2,3,4, both methods and polarizations, 16 loaded queries, 1 MiB scalar ceiling. |
+| Default package release build, no optional features | Passed, exit 0. |
+| Smoke CSV/metadata audit | Passed: 108 error rows, 24 axis rows, 12 signed summaries; saved queries byte-identical; finite error metrics; first rates NA, actual ratios 1.5 and 4/3; completion and native-not-run recorded. |
+| Relevant rustfmt and whitespace | Passed; new files explicitly included in whitespace audit. |
+| Excluded files and baseline | No native/physics/dependency/lockfile changes; baseline clean at 9e7caf7. |
+
+The deterministic overshoot fixture returned S=-0.125 at its midpoint and
+S=-0.09375, S_x=-0.25 at x=0.25, without clipping or method switching. The smoke
+observed four negative cubic samples out of 16 at four cells, for each
+polarization, minimum S/S_peak=-0.02091764471756743. Cubic had no negative sampled
+values at two/three cells; multilinear had none at any smoke resolution. These
+are sampled observations, not domain-wide positivity or convergence claims.
+Largest smoke scalar allocation: 5,000 bytes. Output:
+`/private/tmp/ptarmigan-cubic-smoke-20260916`. This is only an invocation/loading/
+serialization smoke. Its coarse rates and target misses are not production
+accuracy evidence, and no automatic refinement followed.
+
+Actual final commands:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
+ENVELOPE_CELLS=2,3,4 ENVELOPE_MAX_MIB=1 ENVELOPE_QUERIES=/private/tmp/ptarmigan-gaussian-smoke-20260916/queries.csv ENVELOPE_OUTPUT=/private/tmp/ptarmigan-cubic-smoke-20260916 cargo test --locked --release -p ptarmigan --no-default-features field::envelope::validation::gaussian_convergence -- --ignored --exact --nocapture --test-threads=1
+cargo build --locked --release -p ptarmigan --no-default-features
+rustfmt --edition 2018 --check src/field/envelope/mod.rs
+git diff --check
+git -C ../ptarmigan-baseline status --short
+git -C ../ptarmigan-baseline rev-parse --short HEAD
+```
+
+Rustfmt follows the envelope module tree, including new files. A Python CSV audit
+checked row counts, exact saved-query bytes, finiteness, per-method initial rates,
+ratios and completion metadata. An explicit all-changed-source whitespace scan
+included untracked files. The initial focused run also passed 42/2; two new test
+panic-format warnings were corrected before the final run. Existing unused-code
+warnings and nonfatal rust-objcopy/libLLVM build-script warning remain.
+
+Pending full comparison (prepared, **not run**), with the existing benchmark's
+default physical parameters, zero offsets and extent=2; clear any conflicting
+ENVELOPE_* overrides first:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+ENVELOPE_CELLS=16,32,64 ENVELOPE_MAX_MIB=256 \
+ENVELOPE_QUERIES=output/envelope-gaussian/queries.csv \
+ENVELOPE_OUTPUT=output/envelope-cubic-comparison \
+cargo test --locked --release -p ptarmigan --no-default-features \
+field::envelope::validation::gaussian_convergence -- --ignored --exact --nocapture --test-threads=1
+```
+
+Cubic orders near three for values and two for gradients remain expected, not
+verified asymptotic results. Shared-slope continuity is verified to roundoff in
+small tests, not bit-exact under canonical reconstruction. Positivity remains
+unresolved: the option is not ready for particle/radiation use. Performance and
+peak process memory are unmeasured; 16 versus up to 256 nodal values is only a
+stencil-size comparison. No full Gaussian comparison, native diagnostic, particle
+simulation, HDF5/LASY work or performance study ran in this change.
+
+Suggested commit message: `feat(field): add optional shared-slope cubic envelope sampling`.
+
+## 2026-09-16: capture runtime provenance before report creation
+
+Preserved all existing uncommitted cubic implementation and documentation changes.
+This follow-up changes only `validation/report.rs` and this progress log. Runtime
+Git commit and `git status --porcelain` are now captured before creating any report
+output directory or file. Runtime status describes the working tree immediately
+before report creation; pre-existing untracked files, including files inside an
+output directory, still count as dirty. No output-path filtering was introduced.
+Unavailable-Git handling, compiled-commit metadata, exclusive creation, output
+schemas, interpolation and benchmark calculations are unchanged.
+
+Actual checks:
+
+- Focused release envelope tests: 44 matched, 42 passed, 2 ignored, 0 failed;
+  132 unrelated tests filtered out.
+- Isolated subprocess verification in temporary repositories: clean checkout plus
+  a new unignored report directory records clean; pre-existing untracked file
+  inside the output directory records dirty; modified tracked file records dirty.
+  Captured status equals the pre-run porcelain output and commit equals each
+  fixture repository's HEAD. A fourth, non-repository directory verified the
+  existing `unavailable` handling. Compiled-commit metadata stayed unchanged.
+- Each of those four subprocess runs invoked only the tiny two-cell, one-query
+  Gaussian runner: 1 matched and passed, 175 filtered out per run. Each repeat
+  invocation failed as expected because metadata already existed; its bytes
+  remained unchanged. These four deliberate failures verified overwrite protection.
+- `rustfmt --edition 2018 --check src/field/envelope/validation/report.rs` and
+  `git diff --check` passed. Hash comparison confirmed all other pre-existing
+  changed/untracked files were untouched.
+
+Commands:
+
+```bash
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
+python3 /private/tmp/ptarmigan-check-provenance.py
+rustfmt --edition 2018 --check src/field/envelope/validation/report.rs
+git diff --check
+```
+
+The verification script launches the freshly built test executable with explicit
+subprocess `cwd` values; it never changes the parent process working directory.
+Temporary Git commits establish fixture HEADs only; the project repository was
+not committed or pushed. Evidence is in
+`/private/tmp/ptarmigan-provenance-u6z0eh56`. No full Gaussian comparison, native
+diagnostic or particle simulations were run. Existing build warnings remain.

@@ -1,6 +1,6 @@
 use super::{EnvelopeGrid, SampleError, UniformAxis};
 
-/// One sample of the multilinear interpolant. This is not a laboratory four-vector.
+/// One sample of the selected interpolant. This is not a laboratory four-vector.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoredEnvelopeSample {
     /// Dimensionless, already cycle-averaged S = a_rms^2.
@@ -10,7 +10,11 @@ pub struct StoredEnvelopeSample {
 }
 
 /// Locate using comparisons to canonical nodes, never a coordinate tolerance.
-fn locate(axis: &UniformAxis, q: f64, axis_index: usize) -> Result<(usize, f64), SampleError> {
+pub(super) fn locate(
+    axis: &UniformAxis,
+    q: f64,
+    axis_index: usize,
+) -> Result<(usize, f64), SampleError> {
     if !q.is_finite() {
         return Err(SampleError::NonFiniteCoordinate {
             axis: axis_index,

@@ -164,16 +164,15 @@ The future constant axial wavevector is physical `2*pi/lambda * (1,0,0,1)` in
 inverse metres; event routines use `kappa = c * COMPTON_TIME * k` instead.
 Laboratory-gradient conversion is implemented; wavevector evaluation remains pending.
 
-Reinspection of `FocusedLaser::a_sqd`, `envelope_and_grad` and `grad_a_sqd`
-identifies a **source-level discrepancy awaiting numerical verification**.
-For `S = B(x,y,z) F(xi)`, varying ct at fixed laboratory x, y and z gives
-`dS/d(ct) = B F' = S_xi`. The native gradient's time component also includes
-`-grad_beam[2] * envelope`, apparently contributing `-S_z` from independent
-longitudinal beam evolution. The source therefore suggests a time-component
-difference of `-S_z`; this is not a numerically validated bug, and its effect on
-trajectories has not been established. A future diagnostic must finite-difference
-the native scalar at fixed laboratory position and compare it to the native
-gradient (see validation). Do not alter native physics or force agreement here.
+The native Gaussian time-gradient discrepancy is separate from interpolation.
+Source inspection predicts `g_native[0] - S_xi = -S_z`: native `grad_a_sqd`
+includes independent longitudinal beam evolution in its time component.
+The user's completed diagnostic in `output/envelope-native` numerically confirms
+a discrepancy at the tested points. At on-axis z=z_R/2, xi=0, fixed-position
+finite differences and the analytical time derivative are zero, while the linear
+native time component is about 3259.493 /m. Trajectory effects remain unestablished.
+These existing outputs were inspected, not regenerated in the cubic task; native
+physics is unchanged. See the validation guide for scope and conventions.
 
 ## Remaining milestone 1 work
 
@@ -244,7 +243,7 @@ domain rules are unchanged. `queries.csv` records the actual physical queries.
 for S, four stored derivatives and four laboratory components. Rates use the
 actual successive cell-count ratio; zero/nonfinite errors or missing previous
 data give `NA`. Nonfinite measurements abort a study instead of producing a
-misleading success. Expected asymptotic orders (value 2, gradients 1) are not
+misleading success. Expected multilinear asymptotic orders (value 2, gradients 1) are not
 assertions. Provisional maximum normalized targets are 1e-3 for S and 1e-2 for
 gradients. Misses are reported without automatic refinement.
 
@@ -252,8 +251,8 @@ The separate native diagnostic uses an unshifted reference, both polarizations,
 on-axis z=z_R/2 at xi=0, and a generic nonzero-xi/off-axis point. It writes scalar,
 full-gradient and native-scalar finite-difference comparisons at three steps.
 Disagreement is diagnostic output, not a failing regression assertion. This
-diagnostic is implemented but has not been run; the source-level native-gradient
-discrepancy still awaits numerical verification.
+diagnostic was run separately by the user; its existing output confirms the
+time-gradient discrepancy at the tested points. It was not rerun for cubic work.
 
 Output includes human-readable summaries, CSVs, and `metadata.txt` containing
 runtime Git commit/dirty state, compile-time Git/features, physical parameters,
@@ -263,14 +262,74 @@ Files are created exclusively; reuse requires a fresh output directory. Default
 outputs live under the already ignored `/output/`. No output data is committed.
 
 See [validation commands and configuration](numerical-envelope-validation.md#gaussian-tooling-commands)
-and [progress](numerical-envelope-progress.md) for actual runs. Full Gaussian
-convergence and measured sampling cost/peak memory remain pending.
+and [progress](numerical-envelope-progress.md) for actual runs. The existing
+multilinear 16/32/64 study shows expected convergence but misses sampled targets.
+The full cubic comparison and measured sampling cost/peak memory remain pending.
 
-Defer smooth tensor-product cubic interpolation until after the reference is
-validated. A shared-slope cubic candidate uses four nodes per axis (256 samples),
-with an explicit one-node halo or subsequently validated boundary slopes.
-On-demand coefficients avoid persistent derivative arrays. Overshoot can cause
-negative S; never clamp a value while retaining the original gradient.
+## Optional shared-slope cubic interpolation
+
+`InterpolationMethod::{Multilinear,Cubic}` selects
+`sample_stored_with_method(q, method)` or `sample_lab_with_method(r, method)`.
+Existing `sample_stored(q)` and `sample_lab(r)` remain multilinear. Both methods
+share the laboratory transform and finite-result checks; derivatives retain the
+stored/laboratory distinction and the same normalization. The cubic stored sampler
+also rejects nonfinite results. `cubic.rs` contains the separate implementation.
+
+On a cell, u=(q-q_i)/h, use
+
+```text
+P = H00 f_i + H10 h m_i + H01 f_(i+1) + H11 h m_(i+1)
+H00=2u^3-3u^2+1; H10=u^3-2u^2+u
+H01=-2u^3+3u^2; H11=u^3-u^2
+m_i=(f_(i+1)-f_(i-1))/(2h)                 interior
+m_0=(-3f_0+4f_1-f_2)/(2h)                 lower endpoint
+m_N=(3f_N-4f_(N-1)+f_(N-2))/(2h)          upper endpoint
+```
+
+These slopes belong to shared nodes, not individual cells. Value weights and
+analytically differentiated weights define a four-dimensional tensor product;
+mixed terms follow from the linear operators without derivative arrays. The
+implementation subtracts a common stencil value before applying weights, reducing
+common-offset cancellation and preserving constants exactly. It uses stack arrays,
+no per-sample heap allocation and no coefficient grids. Each axis uses at most
+four nodes (three in boundary cells); cubic requires at least three nodes on every
+axis or returns `UnsupportedCubicAxis`. Two-node grids remain valid for multilinear.
+There is no fallback. Nominal distinct nodal reads grow from 16 to at most 256;
+this is not a measured runtime ratio.
+
+The canonical locator, strict domain and positive-side knot convention are shared
+unchanged. The upper endpoint selects the final cell. No extrapolation or domain
+expansion is introduced. As in multilinear sampling, the locator caps an in-domain
+fraction that rounds above one; it never admits or moves an outside coordinate.
+Canonical FMA reconstruction can slightly change node separations from nominal h.
+Shared slopes give C1 continuity in exact arithmetic; numerical continuity and
+quadratic reproduction are expected only to floating-point accuracy on
+well-conditioned grids, not bit-exact equality. Centred approximate slopes generally
+limit smooth-function convergence to about order three for values and two for
+gradients, not four/three. Those orders remain expectations for the pending study.
+
+**Signed overshoot is exposed unchanged.** Nonnegative nodes can produce negative
+S; no clipping, limiter, log interpolation or hidden method switch is applied.
+The small fixture `[0,0,1,1]` gives S=-0.125 at x=0.5 and S=-0.09375,
+S_x=-0.25 at x=0.25 (unit spacing). This option is for diagnostic evaluation and
+is not ready for particle/radiation use until positivity is addressed separately.
+
+The Gaussian runner evaluates both methods on each grid before releasing it.
+`ENVELOPE_QUERIES` optionally loads an existing `queries.csv`; otherwise the
+original deterministic generator is retained. Loading requires exactly one each
+of `x_m,y_m,z_m,xi_m,ct_m` (column order may vary), finite numeric values and exact
+numerical `xi == ct-z` after f64 parsing, with signed zeros equal. The writer's
+17-decimal scientific representation round-trips f64. Rounded/truncated inconsistent
+external CSVs fail; points are never adjusted, dropped or regenerated. Every
+point must lie inside the closed canonical domain at every requested resolution.
+Loaded knots/symmetry planes are retained. Metadata records the source and actual
+count; configured seed/count do not override a loaded file.
+
+`errors.csv` has a method column and independent per-method/per-polarization rates.
+Maxima and target decisions explicitly refer to sampled points. `samples.csv`
+separately records sampled minimum S/S_peak, negative count and maximum negative
+excursion `max(0,-min(S/S_peak))`. These diagnostics establish no full-domain
+positivity guarantee. Nonfinite values, derivatives or normalized errors abort.
 
 Tracking, radiation, LASY propagation/import, flying-focus optics, general local
 wavevectors and LCFA remain out of scope. Scalar S cannot reconstruct consistent

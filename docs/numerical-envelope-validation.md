@@ -128,29 +128,36 @@ Small focused tests (both diagnostic runners stay ignored):
 cargo test --locked --release -p ptarmigan --no-default-features field::envelope:: -- --test-threads=1
 ```
 
-Tiny smoke example, solely for invocation/output serialization:
+Tiny smoke example, solely for invocation/output serialization and loading the
+previous 16-query smoke file (use an existing saved file at this path):
 
 ```bash
 ENVELOPE_CELLS=2,3,4 ENVELOPE_SAMPLES=16 ENVELOPE_MAX_MIB=1 \
-ENVELOPE_SEED=20260916 ENVELOPE_OUTPUT=output/envelope-smoke \
+ENVELOPE_QUERIES=/private/tmp/ptarmigan-gaussian-smoke-20260916/queries.csv \
+ENVELOPE_OUTPUT=output/envelope-cubic-smoke \
 cargo test --locked --release -p ptarmigan --no-default-features \
 field::envelope::validation::gaussian_convergence -- --ignored --exact --nocapture --test-threads=1
 ```
 
-Full three-resolution Gaussian study, **prepared but not run**:
+Full three-resolution method comparison, **prepared but not run**. This loads
+the exact queries from the completed multilinear study into a new output directory.
+Use its default physical parameters, zero offsets and extent=2; clear conflicting
+ENVELOPE_* overrides first:
 
 ```bash
-ENVELOPE_CELLS=16,32,64 ENVELOPE_SAMPLES=1024 ENVELOPE_MAX_MIB=256 \
-ENVELOPE_SEED=20260916 ENVELOPE_OUTPUT=output/envelope-gaussian \
+ENVELOPE_CELLS=16,32,64 ENVELOPE_MAX_MIB=256 \
+ENVELOPE_QUERIES=output/envelope-gaussian/queries.csv \
+ENVELOPE_OUTPUT=output/envelope-cubic-comparison \
 cargo test --locked --release -p ptarmigan --no-default-features \
 field::envelope::validation::gaussian_convergence -- --ignored --exact --nocapture --test-threads=1
 ```
 
-Separate native diagnostic, **prepared but not run** (leave offsets zero):
+Separate native diagnostic command (already run by the user; **not rerun for
+cubic work**). A repeat needs a fresh directory and zero offsets:
 
 ```bash
 ENVELOPE_X_C_M=0 ENVELOPE_Y_C_M=0 ENVELOPE_Z_F_M=0 ENVELOPE_XI_C_M=0 \
-ENVELOPE_OUTPUT=output/envelope-native \
+ENVELOPE_OUTPUT=output/envelope-native-repeat \
 cargo test --locked --release -p ptarmigan --no-default-features \
 field::envelope::validation::native_gaussian_diagnostic -- --ignored --exact --nocapture --test-threads=1
 ```
@@ -173,8 +180,9 @@ All physical values are SI. Both polarizations are always evaluated. Defaults:
 | `ENVELOPE_Z_F_M` | `0`, focal z |
 | `ENVELOPE_XI_C_M` | `0`, retarded-coordinate offset |
 | `ENVELOPE_EXTENT` | `2`, domain +/-extent times w0,w0,zR,cT about offsets |
-| `ENVELOPE_CELLS` | `16,32,64`, positive strictly increasing counts; nodes=cells+1 |
-| `ENVELOPE_SAMPLES` | `1024`, fixed interior query count |
+| `ENVELOPE_CELLS` | `16,32,64`, strictly increasing counts >=2 for comparison; nodes=cells+1 |
+| `ENVELOPE_SAMPLES` | `1024`, generated interior query count; ignored when loading |
+| `ENVELOPE_QUERIES` | unset; optional saved numeric CSV, all rows used unchanged |
 | `ENVELOPE_SEED` | `20260916`, u64 RNG seed |
 | `ENVELOPE_MAX_MIB` | `256`, scalar-allocation ceiling only |
 | `ENVELOPE_OUTPUT` | `output/envelope-gaussian` or `output/envelope-native` |
@@ -191,21 +199,45 @@ That xi offset places the focus/temporal peak at ct=0. Unset overrides to restor
 defaults; metadata records the actual settings. The native diagnostic rejects
 nonzero offsets and does not use configured grid counts or random samples.
 
-Gaussian outputs: `metadata.txt`, `axes.csv`, `queries.csv`, `errors.csv`.
+Gaussian outputs: `metadata.txt`, `axes.csv`, `queries.csv`, `errors.csv`,
+`samples.csv`. Errors and signed-sample summaries separate both methods; axes are
+shared. `ENVELOPE_QUERIES` requires finite required columns and exact parsed
+`xi == ct-z`, with signed zero equality. All rows must fit every canonical grid;
+no tolerance, relocation, dropping or regeneration is allowed. Saved 17-decimal
+scientific numbers round-trip exactly. Loaded points need not avoid knots.
+Reusing a seed alone is not a substitute for loading the original physical points.
 Native outputs: `metadata.txt`, `native.csv` (all four components and all three
 finite-difference steps; scalar comparisons included). Estimated scalar memory is
 8*(cells+1)^4 bytes, printed before each allocation and recorded per resolution.
 It is not measured peak process memory. Each resolution's grid is released before
 the next; queries and small axis/report structures persist.
 
-## Pending benchmarks (not run at production resolutions)
+## Existing user-run results and pending benchmarks
 
-Simulation runs will be performed separately by the user. None of these items
-is marked complete by the exact-function or finite-difference tests:
+Read-only inspection of `output/envelope-gaussian` confirms the completed
+16/32/64-cell multilinear study at commit `6caf275`, 1024 saved queries, both
+polarizations and default physical parameters. The supplied interpretation is
+approximately second-order scalar and first-order gradient RMS convergence.
+At 64 cells, sampled maximum normalized errors are about 2.329e-3 for S and
+1.024e-1 for S_xi: provisional 1e-3/1e-2 sampled targets were missed. This
+is convergence evidence, not satisfactory production accuracy or a domain bound.
+The existing output directory was preserved. No full comparison ran in this task.
 
-- [ ] Broad analytical Gaussian value/gradient error study (small regression fixtures passed).
-- [ ] Three-resolution Gaussian convergence.
-- [ ] Independent numerical check of the native Gaussian time-gradient discrepancy.
+The separately completed `output/envelope-native` diagnostic confirms the native
+time-gradient discrepancy at the tested points. On-axis at z=z_R/2 and xi=0,
+the linear native time component is about 3259.493 /m while all three fixed-position
+scalar finite differences and the analytical time derivative are zero. The
+circular result is twice that value. Native physics and trajectory effects are
+outside this change; no native diagnostic was rerun.
+
+
+Simulation runs will be performed separately by the user. Completed items below
+refer to the existing user-run outputs, not the small regression tests:
+
+- [x] Initial multilinear three-resolution Gaussian study (user run, targets missed).
+- [x] Native Gaussian time-gradient diagnostic at prepared points (user run).
+- [ ] Full multilinear/cubic comparison on the saved physical queries.
+- [ ] Positivity policy and broader error validation before particle use.
 - [ ] Sampling cost and memory measurements.
 - [ ] Radiation-free trajectories.
 - [ ] LMA radiation.
@@ -218,11 +250,10 @@ reproduce spatial gradients or finite-beam dynamics.
 ## Remaining validation design (not yet verified)
 
 Gaussian tooling now provides reproducible off-grid points, both polarizations,
-translations and independent scalar checks. Larger measurements remain pending.
-At symmetry knots the multilinear one-sided derivative need not vanish. The
-native time-gradient finding is a **source-level discrepancy
-awaiting numerical verification**. The source suggests
-`g_native[0] - g_reference[0] = -S_z`; numerical confirmation and any trajectory
+translations and independent scalar checks. The larger cubic comparison remains
+pending. At symmetry knots the multilinear one-sided derivative need not vanish.
+The native time-gradient source prediction `g_native[0] - g_reference[0] = -S_z`
+is supported by the existing diagnostic at its tested points; trajectory
 consequences remain unestablished.
 
 Prepared native diagnostic: choose nonzero amplitude, `x=y=0`, `z=z_R/2 != 0`, and the
@@ -238,7 +269,7 @@ estimate of `dS/d(ct)` with `FocusedLaser::grad_a_sqd(r)[0]` and the analytic
 `B F'`. Vary h to check roundoff/truncation, and add an off-peak control point
 where the time derivative is nonzero. Report scale-normalized absolute errors
 near the peak's zero derivative. This diagnostic is implemented as an ignored
-runner, but has not been run; native field physics remains unchanged.
+runner and was run separately by the user; native field physics remains unchanged.
 
 Files: missing/wrong metadata, unknown version, wrong rank/type/shape/units,
 invalid axes and scalar values, resource limits and multi-rank rejection.
@@ -248,11 +279,38 @@ Convergence: begin with 16/32/64 cells per axis on a fixed domain
 off-grid points across resolutions. Report max and RMS absolute error, normalized
 by S_peak, S_peak/w0, S_peak/z_R and S_peak/(cT) as appropriate; use
 `S_peak/z_R + S_peak/(cT)` for the combined lab longitudinal component. Report
-`log2(error_coarse/error_fine)`. Refine if provisional value `1e-3` and gradient
-`1e-2` targets are missed; these are engineering targets, not physics tolerances.
+`ln(error_coarse/error_fine)/ln(cells_fine/cells_coarse)`, separately for each
+method and polarization. Provisional sampled value `1e-3` and gradient `1e-2`
+targets are engineering targets, not physics tolerances. Report misses; decide
+refinement separately, with no automatic refinement in this runner.
 
 Performance: a future sampling-cost runner should use warm-up, precomputed
 coherent/random queries, black_box, repeated batches and median ns/sample.
 Measure generation/loading separately. No sampling-cost or peak-memory runner
 has been implemented or run; the Gaussian runner reports estimated scalar storage
-only. Full-resolution Gaussian convergence is prepared but unrun.
+only. Full-resolution cubic comparison is prepared but unrun. The nominal 16
+versus up to 256 distinct nodal values is not a measured runtime ratio.
+
+
+## Small cubic validation
+
+Six new mathematical tests cover constants (including a large common offset),
+shifted affine fields on unequal axes, positive tensor-product quadratics,
+interior/boundary cells, all nodal combinations, three-node operation, independent
+left/right polynomials on every shared face, and micrometre finite differences
+of a nonquadratic scalar. Laboratory z differences hold ct fixed. Other checks
+cover immediate outside floats, NaN/infinity, arithmetic overflow, two-node
+rejection only for cubic, signed overshoot and unchanged multilinear defaults.
+Continuity tests use rounded canonical separations instead of assuming exact h.
+Algebraic comparisons allow 512 machine epsilons times scalar or S/h scales for
+stencil summation and coordinate roundoff. Finite differences use characteristic
+micrometre scales with O(step^2) truncation and O(machine_epsilon/step) roundoff.
+
+One new loader test checks saved-query round trips, invalid/missing/nonfinite/
+inconsistent data, and a rounded-domain point accepted at one resolution but
+rejected at another. No points are repaired. Existing multilinear tests remain.
+The small fixture verifies S=-0.125 and an off-centre negative sample with its
+unchanged derivative; these demonstrate why signed diagnostics cannot become a
+particle-field policy without separate work. Counts and the tiny smoke's actual
+signed samples are recorded in progress. Cubic orders near three/two remain
+expected behaviour, not verified asymptotic rates.

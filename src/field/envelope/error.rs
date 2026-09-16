@@ -60,6 +60,10 @@ impl std::error::Error for GridError {}
 /// laboratory component indices refer to (ct, x, y, z).
 #[derive(Debug, PartialEq)]
 pub enum SampleError {
+    UnsupportedCubicAxis {
+        axis: usize,
+        nodes: usize,
+    },
     NonFiniteCoordinate {
         axis: usize,
         coordinate: f64,
@@ -100,6 +104,8 @@ impl fmt::Display for SampleError {
                 .unwrap_or("unknown")
         };
         match self {
+            Self::UnsupportedCubicAxis { axis, nodes } => write!(f,
+                "cubic interpolation requires at least three nodes on {} axis, got {}", axis_name(*axis), nodes),
             Self::NonFiniteLabCoordinate { component, coordinate } => write!(f,
                 "nonfinite laboratory {} coordinate: {} (expected finite metres)",
                 ["ct", "x", "y", "z"].get(*component).unwrap_or(&"unknown"), coordinate),
@@ -109,7 +115,7 @@ impl fmt::Display for SampleError {
                 "laboratory (ct,x,y,z)={:?} m maps via xi=ct-z to stored {}={} m outside canonical domain [{}, {}] m",
                 position, axis_name(*axis), coordinate, min, max),
             Self::NonFiniteResult { quantity, value } => write!(f,
-                "cannot return laboratory envelope sample: nonfinite {} result ({})", quantity, value),
+                "cannot return envelope sample: nonfinite {} result ({})", quantity, value),
             Self::NonFiniteCoordinate { axis, coordinate } => write!(
                 f,
                 "nonfinite {} coordinate: {} (expected finite metres)",

@@ -2,6 +2,7 @@
 mod gaussian;
 mod grid;
 mod native;
+mod queries;
 mod report;
 mod runner;
 mod statistics;
